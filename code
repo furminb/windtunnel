@@ -1,0 +1,408 @@
+
+#include <SPI.h>
+#include <SD.h>
+#include <TimeLib.h>
+#include <LiquidCrystal.h>
+
+//Globals for temperature
+#define RT00 10000   // Ω
+#define B 3977      // K
+#define VCC 5    //Supply voltage
+#define R 10000  //R=10KΩ
+
+//Variables for temperature
+float T0;
+float T_AVG;
+float RT0, VR0, ln0, TX0, VRT0, TX0_Sum, TX0_AVG;
+float RT1, VR1, ln1, TX1, VRT1, TX1_Sum, TX1_AVG;
+float RT2, VR2, ln2, TX2, VRT2, TX2_Sum, TX2_AVG;
+float RT3, VR3, ln3, TX3, VRT3, TX3_Sum, TX3_AVG;
+float RT4, VR4, ln4, TX4, VRT4, TX4_Sum, TX4_AVG;
+float RT5, VR5, ln5, TX5, VRT5, TX5_Sum, TX5_AVG;
+float RT6, VR6, ln6, TX6, VRT6, TX6_Sum, TX6_AVG;
+float RT7, VR7, ln7, TX7, VRT7, TX7_Sum, TX7_AVG;
+float RT8, VR8, ln8, TX8, VRT8, TX8_Sum, TX8_AVG;
+float RT9, VR9, ln9, TX9, VRT9, TX9_Sum, TX9_AVG;
+float RT10, VR10, ln10, TX10, VRT10, TX10_Sum, TX10_AVG;
+float RT11, VR11, ln11, TX11, VRT11, TX11_Sum, TX11_AVG;
+int i = 1;
+int currentSecond = 10;
+long t = 0;
+//
+
+// initialize the library by associating any needed LCD interface pin
+// with the arduino pin number it is connected to
+const int rs = 12, en = 11, d4 = 5, d5 = 4, d6 = 3, d7 = 2;
+LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
+//
+
+//Airspeed variables
+float V_0 = 5.0; // supply voltage to the pressure sensor
+float rho = 1.28; // density of air at 2C
+int offset0 = 0;
+int offset1 = 0;
+int offset2 = 0;
+int offset_size = 10;
+int veloc_mean_size = 20;
+int zero_span = 2;
+float cfm_avg = 0.0;
+int cfm_total = 0.0;
+int cfm_count = 1;
+
+//
+File myFile;
+
+void setup() {
+  // Open serial communications and wait for port to open:
+  Serial.begin(9600);
+  T0 = 25 + 273.15;
+  while (!Serial) {
+    ; // wait for serial port to connect. Needed for native USB port only
+  }
+  Serial.print("Initializing SD card...");
+  if (!SD.begin(53)) {
+    Serial.println("initialization failed!");
+    while (1);
+  }
+  Serial.println("initialization done.");
+  // open the file. note that only one file can be open at a time,
+  // so you have to close this one before opening another.
+  // if the file opened okay, write to it:
+  Serial.println("veloc0,veloc1,veloc2,veloc_avg,cfm,cfm_total,cfm_count,cfm_avg,TX_0,TX_1,TX_2,TX_3,TX_4,TX_5,TX_6,TX_6,T_AVG");
+  myFile = SD.open("test.txt", FILE_WRITE);
+  myFile.println("Time(s),Temp1(C),Temp2(C),Temp3(C),Temp4(C),Temp5(C),Temp6(C),Temp7(C),Temp8(C),Temp9(C),Temp10(C),Temp11(C),Temp12(C),");
+  myFile.close();
+  //initialize LCD
+  lcd.begin(20, 4);
+  lcd.setCursor(0, 1);
+  lcd.print("Spd(cfm):");
+  lcd.setCursor(0, 2);
+  lcd.print("Avg Temp:");
+  //
+
+  //Set offsets for the fan speed
+  for (int j = 0; j < offset_size; j++) {
+    offset0 += analogRead(A13) - (1023 / 2);
+  }
+  offset0 /= offset_size;
+  for (int j = 0; j < offset_size; j++) {
+    offset1 += analogRead(A14) - (1023 / 2);
+  }
+  offset1 /= offset_size;
+  for (int j = 0; j < offset_size; j++) {
+    offset2 += analogRead(A15) - (1023 / 2);
+  }
+  offset2 /= offset_size;
+  //
+
+  //Set temperature variables equal to 0
+  TX0_Sum = 0.0;
+  TX1_Sum = 0.0;
+  TX2_Sum = 0.0;
+  TX3_Sum = 0.0;
+  TX4_Sum = 0.0;
+  TX5_Sum = 0.0;
+  TX6_Sum = 0.0;
+  TX7_Sum = 0.0;
+  TX8_Sum = 0.0;
+  TX9_Sum = 0.0;
+  TX10_Sum = 0.0;
+  TX11_Sum = 0.0;
+
+  T_AVG = 0.0;
+  //
+
+}
+void loop() {
+  float adc0_avg = 0;
+  float veloc0 = 0.0;
+  float adc1_avg = 0;
+  float veloc1 = 0.0;
+  float adc2_avg = 0;
+  float veloc2 = 0.0;
+  float veloc_avg = 0.0;
+  float veloc_count = 0;
+  float cfm = 0.0;
+  float cfm_tot_avg = 0.0;
+
+  VRT0 = analogRead(A0);              //Acquisition analog value of VRT
+  VRT0 = (5.00 / 1023.00) * VRT0;      //Conversion to voltage
+  VR0 = VCC - VRT0;
+  RT0 = VRT0 / (VR0 / R);               //Resistance of RT
+  ln0 = log(RT0 / RT00);
+  TX0 = (1 / ((ln0 / B) + (1 / T0))); //Temperature from thermistor
+  TX0 = TX0 - 273.15;
+  TX0_Sum += TX0;
+
+  VRT1 = analogRead(A1);              //Acquisition analog value of VRT
+  VRT1 = (5.00 / 1023.00) * VRT1;      //Conversion to voltage
+  VR1 = VCC - VRT1;
+  RT1 = VRT1 / (VR1 / R);               //Resistance of RT
+  ln1 = log(RT1 / RT00);
+  TX1 = (1 / ((ln1 / B) + (1 / T0))); //Temperature from thermistor
+  TX1 = TX1 - 273.15;
+  TX1_Sum += TX0;
+
+  VRT2 = analogRead(A2);              //Acquisition analog value of VRT
+  VRT2 = (5.00 / 1023.00) * VRT2;      //Conversion to voltage
+  VR2 = VCC - VRT2;
+  RT2 = VRT2 / (VR2 / R);               //Resistance of RT
+  ln2 = log(RT2 / RT00);
+  TX2 = (1 / ((ln2 / B) + (1 / T0))); //Temperature from thermistor
+  TX2 = TX2 - 273.15;
+  TX2_Sum += TX2;
+
+  VRT3 = analogRead(A3);              //Acquisition analog value of VRT
+  VRT3 = (5.00 / 1023.00) * VRT3;      //Conversion to voltage
+  VR3 = VCC - VRT3;
+  RT3 = VRT3 / (VR3 / R);               //Resistance of RT
+  ln3 = log(RT3 / RT00);
+  TX3 = (1 / ((ln3 / B) + (1 / T0))); //Temperature from thermistor
+  TX3 = TX3 - 273.15;
+  TX3_Sum += TX3;
+
+  VRT4 = analogRead(A4);              //Acquisition analog value of VRT
+  VRT4 = (5.00 / 1023.00) * VRT4;      //Conversion to voltage
+  VR4 = VCC - VRT4;
+  RT4 = VRT4 / (VR4 / R);               //Resistance of RT
+  ln4 = log(RT4 / RT00);
+  TX4 = (1 / ((ln4 / B) + (1 / T0))); //Temperature from thermistor
+  TX4 = TX4 - 273.15;
+  TX4_Sum += TX4;
+
+  VRT5 = analogRead(A5);              //Acquisition analog value of VRT
+  VRT5 = (5.00 / 1023.00) * VRT5;      //Conversion to voltage
+  VR5 = VCC - VRT5;
+  RT5 = VRT5 / (VR5 / R);               //Resistance of RT
+  ln5 = log(RT5 / RT00);
+  TX5 = (1 / ((ln5 / B) + (1 / T0))); //Temperature from thermistor
+  TX5 = TX5 - 273.15;
+  TX5_Sum += TX5;
+
+  VRT6 = analogRead(A6);              //Acquisition analog value of VRT
+  VRT6 = (5.00 / 1023.00) * VRT6;      //Conversion to voltage
+  VR6 = VCC - VRT6;
+  RT6 = VRT6 / (VR6 / R);               //Resistance of RT
+  ln6 = log(RT6 / RT00);
+  TX6 = (1 / ((ln6 / B) + (1 / T0))); //Temperature from thermistor
+  TX6 = TX6 - 273.15;
+  TX6_Sum += TX6;
+
+  VRT7 = analogRead(A7);              //Acquisition analog value of VRT
+  VRT7 = (5.00 / 1023.00) * VRT7;      //Conversion to voltage
+  VR7 = VCC - VRT7;
+  RT7 = VRT7 / (VR7 / R);               //Resistance of RT
+  ln7 = log(RT7 / RT00);
+  TX7 = (1 / ((ln7 / B) + (1 / T0))); //Temperature from thermistor
+  TX7 = TX7 - 273.15;
+  TX7_Sum += TX7;
+
+  VRT8 = analogRead(A8);              //Acquisition analog value of VRT
+  VRT8 = (5.00 / 1023.00) * VRT8;      //Conversion to voltage
+  VR8 = VCC - VRT8;
+  RT8 = VRT8 / (VR8 / R);               //Resistance of RT
+  ln8 = log(RT8 / RT00);
+  TX8 = (1 / ((ln8 / B) + (1 / T0))); //Temperature from thermistor
+  TX8 = TX8 - 273.15;
+  TX8_Sum += TX8;
+
+  VRT9 = analogRead(A9);              //Acquisition analog value of VRT
+  VRT9 = (5.00 / 1023.00) * VRT9;      //Conversion to voltage
+  VR9 = VCC - VRT9;
+  RT9 = VRT9 / (VR9 / R);               //Resistance of RT
+  ln9 = log(RT9 / RT00);
+  TX9 = (1 / ((ln9 / B) + (1 / T0))); //Temperature from thermistor
+  TX9 = TX9 - 273.15;
+  TX9_Sum += TX9;
+
+  VRT10 = analogRead(A10);              //Acquisition analog value of VRT
+  VRT10 = (5.00 / 1023.00) * VRT10;      //Conversion to voltage
+  VR10 = VCC - VRT7;
+  RT10 = VRT10 / (VR10 / R);               //Resistance of RT
+  ln10 = log(RT10 / RT00);
+  TX10 = (1 / ((ln10 / B) + (1 / T0))); //Temperature from thermistor
+  TX10 = TX10 - 273.15;
+  TX10_Sum += TX10;
+
+  VRT11 = analogRead(A11);              //Acquisition analog value of VRT
+  VRT11 = (5.00 / 1023.00) * VRT11;      //Conversion to voltage
+  VR11 = VCC - VRT11;
+  RT11 = VRT11 / (VR11 / R);               //Resistance of RT
+  ln11 = log(RT11 / RT00);
+  TX11 = (1 / ((ln11 / B) + (1 / T0))); //Temperature from thermistor
+  TX11 = TX11 - 273.15;
+  TX11_Sum += TX11;
+
+  T_AVG = (TX0 + TX1 + TX2 + TX3 + TX4 + TX5 + TX6 + TX7 + TX8 + TX9 + TX10 + TX11) / 12;
+
+  // average a few ADC readings for stability
+  for (int ii = 0; ii < veloc_mean_size; ii++) {
+    adc0_avg += analogRead(A13) - offset0;
+
+  }
+  adc0_avg /= veloc_mean_size;
+  for (int ii = 0; ii < veloc_mean_size; ii++) {
+
+    adc1_avg += analogRead(A14) - offset1;
+
+  }
+  adc1_avg /= veloc_mean_size;
+  for (int ii = 0; ii < veloc_mean_size; ii++) {
+
+    adc2_avg += analogRead(A15) - offset2;
+  }
+  adc2_avg /= veloc_mean_size;
+
+  // make sure if the ADC reads below 512, then we equate it to a negative velocity
+  if (adc0_avg > 512 - zero_span and adc0_avg < 512 + zero_span) {
+  } else {
+    if (adc0_avg < 512) {
+      veloc0 = -sqrt((-10000.0 * ((adc0_avg / 1023.0) - 0.5)) / rho);
+    } else {
+      veloc0 = sqrt((10000.0 * ((adc0_avg / 1023.0) - 0.5)) / rho);
+    }
+  }
+  if (adc1_avg > 512 - zero_span and adc1_avg < 512 + zero_span) {
+  } else {
+    if (adc1_avg < 512) {
+      veloc1 = -sqrt((-10000.0 * ((adc1_avg / 1023.0) - 0.5)) / rho);
+    } else {
+      veloc1 = sqrt((10000.0 * ((adc1_avg / 1023.0) - 0.5)) / rho);
+    }
+  }
+  if (adc2_avg > 512 - zero_span and adc2_avg < 512 + zero_span) {
+  } else {
+    if (adc2_avg < 512) {
+      veloc2 = -sqrt((-10000.0 * ((adc2_avg / 1023.0) - 0.5)) / rho);
+    } else {
+      veloc2 = sqrt((10000.0 * ((adc2_avg / 1023.0) - 0.5)) / rho);
+    }
+  }
+
+  if (veloc0 > 0) {
+    veloc_count ++;
+  } else {
+    veloc0 = 0;
+  }
+  if (veloc1 > 0) {
+    veloc_count ++;
+  } else {
+    veloc1 = 0;
+  }
+  if (veloc2 > 0) {
+    veloc_count ++;
+  } else {
+    veloc2 = 0;
+  }
+  veloc_avg = ((veloc0 + veloc1 + veloc2) / veloc_count);
+
+
+  cfm = 68.71369 * veloc_avg;
+  cfm_total += cfm;
+  cfm_avg = cfm_total / cfm_count;
+  cfm_tot_avg += cfm_avg;
+  if (cfm > 0) {
+    cfm_count ++;
+  }
+  if (cfm_count > 30) {
+    cfm_total = cfm_avg;
+
+    cfm_count = 2;
+  }
+  lcd.setCursor(12, 1);
+  lcd.print(cfm_avg);
+  lcd.setCursor(12, 2);
+  lcd.print(T_AVG);
+  //  Serial.print(veloc0);
+  //  Serial.print(" , ");
+  //  Serial.print(veloc1);
+  //  Serial.print(" , ");
+  //  Serial.print(veloc2);
+  //  Serial.print(" , ");
+  //  Serial.print(veloc_avg);
+  //  Serial.print(" , ");
+  //  Serial.print(cfm);
+  //  Serial.print(" , ");
+  //  Serial.print(cfm_total);
+  //  Serial.print(" , ");
+  //  Serial.print(cfm_count);
+  //  Serial.print(" , ");
+  //  Serial.print(cfm_avg);
+  //  Serial.print(" , ");
+  //  Serial.print(TX0_Sum / i);
+  //  Serial.print(",");
+  //  Serial.print(TX1_Sum / i);
+  //  Serial.print(",");
+  //  Serial.print(TX2_Sum / i);
+  //  Serial.print(",");
+  //  Serial.print(TX3_Sum / i);
+  //  Serial.print(",");
+  //  Serial.print(TX4_Sum / i);
+  //  Serial.print(",");
+  //  Serial.print(TX5_Sum / i);
+  //  Serial.print(",");
+  //  Serial.print(TX6_Sum / i);
+  //  Serial.print(",");
+  //  Serial.print(TX7_Sum / i);
+  //  Serial.print(",");
+  //  Serial.print(T_AVG);
+  //  Serial.println(",");
+
+
+  time_t t = now();
+  if (t >= currentSecond) {
+
+    myFile = SD.open("test.txt", FILE_WRITE);
+    myFile.print(t);
+    myFile.print(",");
+    myFile.print(TX0_Sum / i);
+    myFile.print(",");
+    myFile.print(TX1_Sum / i);
+    myFile.print(",");
+    myFile.print(TX2_Sum / i);
+    myFile.print(",");
+    myFile.print(TX3_Sum / i);
+    myFile.print(",");
+    myFile.print(TX4_Sum / i);
+    myFile.print(",");
+    myFile.print(TX5_Sum / i);
+    myFile.print(",");
+    myFile.print(TX6_Sum / i);
+    myFile.print(",");
+    myFile.print(TX7_Sum / i);
+    myFile.print(",");
+    myFile.print(TX8_Sum / i);
+    myFile.print(",");
+    myFile.print(TX9_Sum / i);
+    myFile.print(",");
+    myFile.print(TX10_Sum / i);
+    myFile.print(",");
+    myFile.print(TX11_Sum / i);
+    myFile.print(",");
+    myFile.print(cfm_tot_avg / i);
+    myFile.println(",");
+    myFile.close();
+
+    currentSecond = t + 10;
+
+    TX0_Sum = 0;
+    TX1_Sum = 0;
+    TX2_Sum = 0;
+    TX3_Sum = 0;
+    TX4_Sum = 0;
+    TX5_Sum = 0;
+    TX6_Sum = 0;
+    TX7_Sum = 0;
+    TX8_Sum = 0;
+    TX9_Sum = 0;
+    TX10_Sum = 0;
+    TX11_Sum = 0;
+    i = 1;
+
+  }
+
+  i++;
+  delay(10);
+
+  // nothing happens after setup
+}
